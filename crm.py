@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+from twilio.rest import Client  # Para WhatsApp via Twilio
 
 # Arquivo para persistência do CRM
 CRM_FILE = 'crm_data.json'
@@ -54,19 +55,35 @@ def enviar_email(destinatario, assunto, corpo, anexo=None, smtp_server='smtp.gma
     except Exception as e:
         return str(e)
 
+# Função para enviar WhatsApp via Twilio
+def enviar_whatsapp(destinatario, mensagem, twilio_sid=None, twilio_token=None, twilio_from=None):
+    if not twilio_sid or not twilio_token or not twilio_from:
+        raise ValueError("Configure as credenciais Twilio em st.secrets.")
+    
+    client = Client(twilio_sid, twilio_token)
+    try:
+        message = client.messages.create(
+            from_=twilio_from,  # Ex: 'whatsapp:+14155238886'
+            body=mensagem,
+            to=destinatario  # Ex: 'whatsapp:+5511999999999'
+        )
+        return True
+    except Exception as e:
+        return str(e)
+
 # Interface
 st.title("CRM Simples - Gerenciamento de Clientes e Vendas com Automação de Marketing")
 
 crm_data = load_crm()
 
-# Tabs (adicionada nova tab para Gerenciar Templates)
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Adicionar Cliente", "Gerenciar Clientes", "Registrar Interação/Venda", "Relatórios", "Enviar Email", "Automação de Marketing", "Gerenciar Templates"])
+# Tabs (adicionada nova tab para Enviar WhatsApp)
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Adicionar Cliente", "Gerenciar Clientes", "Registrar Interação/Venda", "Relatórios", "Enviar Email", "Automação de Marketing", "Gerenciar Templates", "Enviar WhatsApp"])
 
 with tab1:
     st.header("Adicionar Novo Cliente")
     nome_cli = st.text_input("Nome do Cliente", value="")
     email_cli = st.text_input("Email", value="")
-    telefone_cli = st.text_input("Telefone", value="")
+    telefone_cli = st.text_input("Telefone (ex: +5511999999999 para WhatsApp)", value="")
     endereco_cli = st.text_input("Endereço", value="")
     status_cli = st.selectbox("Status", ["Lead", "Cliente Ativo", "Inativo", "Prospect"])
 
@@ -87,7 +104,7 @@ with tab1:
 
 with tab2:
     st.header("Gerenciar Clientes")
-    cliente_selec = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']}" for id, info in crm_data["clientes"].items()] or ["Nenhum"])
+    cliente_selec = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']}" for id, info in crm_data["clientes"].items()] or ["Nenhum"], key="select_cliente_gerenciar")
     if cliente_selec != "Nenhum":
         cli_id = cliente_selec.split(":")[0]
         info = crm_data["clientes"][cli_id]
@@ -95,7 +112,7 @@ with tab2:
         # Editar campos
         novo_nome = st.text_input("Nome", value=info["nome"])
         novo_email = st.text_input("Email", value=info["email"])
-        novo_telefone = st.text_input("Telefone", value=info["telefone"])
+        novo_telefone = st.text_input("Telefone", value=info.get("telefone", ""))
         novo_endereco = st.text_input("Endereço", value=info["endereco"])
         novo_status = st.selectbox("Status", ["Lead", "Cliente Ativo", "Inativo", "Prospect"], index=["Lead", "Cliente Ativo", "Inativo", "Prospect"].index(info["status"]))
 
@@ -120,10 +137,10 @@ with tab2:
 
 with tab3:
     st.header("Registrar Interação ou Venda")
-    cliente_inter = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']}" for id, info in crm_data["clientes"].items()] or ["Nenhum"])
+    cliente_inter = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']}" for id, info in crm_data["clientes"].items()] or ["Nenhum"], key="select_cliente_interacao")
     if cliente_inter != "Nenhum":
         cli_id = cliente_inter.split(":")[0]
-        tipo_inter = st.selectbox("Tipo de Interação", ["Ligação", "Email", "Reunião", "Venda", "Suporte"])
+        tipo_inter = st.selectbox("Tipo de Interação", ["Ligação", "Email", "Reunião", "Venda", "Suporte", "WhatsApp"])
         nota_inter = st.text_area("Notas/Detalhes")
         valor_venda = st.number_input("Valor da Venda (se aplicável, R$)", min_value=0.0, value=0.0) if tipo_inter == "Venda" else 0.0
 
@@ -191,13 +208,13 @@ with tab5:
     st.header("Enviar Email para Cliente")
     st.warning("Configure seu email e senha no st.secrets.toml para envio real. Ex: [secrets] sender_email = 'seuemail@gmail.com' sender_password = 'suasenha' (use app password para Gmail).")
 
-    cliente_email = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']} ({info['email']})" for id, info in crm_data["clientes"].items() if info.get('email')] or ["Nenhum"])
+    cliente_email = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']} ({info['email']})" for id, info in crm_data["clientes"].items() if info.get('email')] or ["Nenhum"], key="select_cliente_email")
     if cliente_email != "Nenhum":
         cli_id = cliente_email.split(":")[0]
         destinatario = crm_data["clientes"][cli_id]["email"]
         
         # Selecionar Template
-        template_selec = st.selectbox("Selecionar Template (opcional)", options=[t["nome"] for t in crm_data["templates"]] + ["Nenhum"])
+        template_selec = st.selectbox("Selecionar Template (opcional)", options=[t["nome"] for t in crm_data["templates"]] + ["Nenhum"], key="select_template_email")
         assunto = ""
         corpo = ""
         if template_selec != "Nenhum":
@@ -248,7 +265,7 @@ with tab6:
     segmento = st.multiselect("Segmento (Status dos Clientes)", ["Lead", "Cliente Ativo", "Inativo", "Prospect"], default=["Lead"])
     
     # Selecionar Template para Campanha
-    template_camp_selec = st.selectbox("Selecionar Template (opcional)", options=[t["nome"] for t in crm_data["templates"]] + ["Nenhum"])
+    template_camp_selec = st.selectbox("Selecionar Template (opcional)", options=[t["nome"] for t in crm_data["templates"]] + ["Nenhum"], key="select_template_campanha")
     assunto_camp = ""
     corpo_camp = ""
     if template_camp_selec != "Nenhum":
@@ -341,4 +358,47 @@ with tab7:
                 save_crm(crm_data)
                 st.rerun()
     else:
-        st.info("Nenhum template cadastrado ")
+        st.info("Nenhum template cadastrado.")
+
+with tab8:
+    st.header("Enviar Mensagem via WhatsApp")
+    st.warning("Configure as credenciais Twilio no st.secrets.toml: [secrets] twilio_sid = 'seu_sid' twilio_token = 'seu_token' twilio_from = 'whatsapp:+numero_twilio'. Certifique-se de que o cliente tem telefone no formato 'whatsapp:+5511999999999'.")
+
+    cliente_wa = st.selectbox("Selecione Cliente", options=[f"{id}: {info['nome']} ({info.get('telefone', 'Sem telefone')})" for id, info in crm_data["clientes"].items() if info.get('telefone')] or ["Nenhum"], key="select_cliente_whatsapp")
+    if cliente_wa != "Nenhum":
+        cli_id = cliente_wa.split(":")[0]
+        destinatario = crm_data["clientes"][cli_id].get("telefone", "")
+        if not destinatario.startswith("whatsapp:"):
+            destinatario = f"whatsapp:{destinatario}"
+
+        # Selecionar Template (reuso para WhatsApp, sem assunto)
+        template_selec_wa = st.selectbox("Selecionar Template (opcional)", options=[t["nome"] for t in crm_data["templates"]] + ["Nenhum"], key="select_template_whatsapp")
+        mensagem = ""
+        if template_selec_wa != "Nenhum":
+            temp = next(t for t in crm_data["templates"] if t["nome"] == template_selec_wa)
+            mensagem = temp["corpo"]
+
+        mensagem = st.text_area("Mensagem para WhatsApp", value=mensagem)
+        mensagem = mensagem.replace("[Nome do Cliente]", crm_data["clientes"][cli_id]["nome"])  # Personalização
+
+        if st.button("Enviar WhatsApp"):
+            try:
+                twilio_sid = st.secrets["twilio_sid"]
+                twilio_token = st.secrets["twilio_token"]
+                twilio_from = st.secrets["twilio_from"]
+                resultado = enviar_whatsapp(destinatario, mensagem, twilio_sid=twilio_sid, twilio_token=twilio_token, twilio_from=twilio_from)
+                if resultado is True:
+                    st.success(f"Mensagem enviada para {destinatario} via WhatsApp!")
+                    # Registrar como interação
+                    interacao = {
+                        "cliente_id": cli_id,
+                        "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "tipo": "WhatsApp",
+                        "nota": f"Mensagem: {mensagem[:100]}..."
+                    }
+                    crm_data["interacoes"].append(interacao)
+                    save_crm(crm_data)
+                else:
+                    st.error(f"Erro ao enviar: {resultado}")
+            except KeyError:
+                st.error("Credenciais Twilio não configuradas em st.secrets.")
